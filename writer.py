@@ -2,41 +2,28 @@
 # -*- coding:utf-8 -*-
 import sys
 import os
+
 from pynput.keyboard import Listener, Key
+from Writer.utils import read_file
+from Writer.buffer import Buffer
+from Writer.key_actions import OnPress
+from Writer.cursor import Cursor
 import math
 
 # Waveshare e-ink specs 
-CHAR_LENGTH =   32
-LINES =         5
-
-# Document directory
-document_direc = os.path.join(
-    os.path.dirname(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.realpath(__file__))))
-    , 'documents')
-
-
-def read_file(file):
-    with open(os.path.join(document_direc, file), 'r') as reader:
-            lines = []
-            for line in reader:
-                lines.append(line)
-            return lines
-
-def dupe(original_list):
-    new_list = []
-    for x in original_list:
-        new_list.append(x)
-    return new_list
+CHAR_LENGTH     =   32
+LINES           =   5 
+LINE_STEP       =   20
+CHAR_WIDTH      =   10
+EPD_HEIGHT      =   128
+EPD_WIDTH       =   296
 
 class Display: 
     def __init__(self, lines):
         self.lines = lines
 
     def lineable(self):
-        # Cut lines to fit on Waveshare screen
+        # when starting the raspberry pi, show viewable lines
         new_lines = []
         for line in self.lines:
             iteration_num = math.ceil(len(line) / CHAR_LENGTH)
@@ -46,16 +33,20 @@ class Display:
                 new_lines.append(line[starting_pos:ending_pos])
         return new_lines
 
-    def max_display(self):
-        return Display(self.lines[:LINES])
+    def max_display(self, x):
+        return self.lineable()[x: x + LINES]
 
-
+# epd = false for debugger!
 class Editor:
-    def __init__(self, file):
+    def __init__(self, file, draw, image, font, epd=False):
         self.cursor = Cursor()
         self.buffer = Buffer(read_file(file))
         self.character = Character()
         self.history = []
+        self.draw = draw
+        self.image = image
+        self.font = font
+        self.epd = epd
 
     def render(self):
         self.buffer.render()
@@ -77,37 +68,36 @@ class Editor:
     def restore_snapshot(self):
         self.buffer, self.cursor, self.character = self.history.pop()
 
-    def on_release(self, key):
-        pass
+    def display_epd(self):
+        if self.epd:
+            self.epd.display(self.epd.getbuffer(self.image))
+        else:
+            self.image.show()
 
-    def set_variables(self, char):
-        self.buffer = self.buffer.insert(char, self.cursor.x, self.cursor.y)
-        self.cursor = self.cursor.right(self.buffer)
-        self.character = Character(char)
+    def on_release(self, key):
+        if hasattr(key, 'char'):
+            coordinates = (self.cursor.y * CHAR_WIDTH, self.cursor.x * LINE_STEP)
+            self.draw.text(coordinates, self.character.char, font = self.font, fill = 0)
+        elif key == Key.tab:
+            # rerender whole screen
+            self.draw.rectangle((0, 0, EPD_HEIGHT, EPD_WIDTH), fill = 255)
+            num = 0
+            for line in Display(self.buffer.lines).max_display(0):
+                self.draw.text((num * CHAR_WIDTH, num * LINE_STEP), line, font = self.font, fill = 0)
+                num += 1
+        elif key == Key.enter:
+            # delete this debugger
+            self.display_epd()
+
+        if self.epd:
+            self.display_epd()
 
     def on_press(self, key):
+        keyable = OnPress(self)
         if hasattr(key, 'char'):
-            self.save_snapshot()
-            self.set_variables(str(key)[1])
-        elif key == Key.space:
-            self.set_variables(" ")
-        elif key == Key.enter:
-            self.set_variables("\n")
-        elif key == Key.tab:
-            self.restore_snapshot()
-        elif key == Key.esc:
-            return False
-        elif key == Key.delete:
-            self.save_snapshot()
-            if self.cursor > 0:
-                self.buffer = self.buffer.delete(self.cursor.x, self.cursor.y)
-                self.cursor = self.cursor.left(self.buffer)
-                self.character = Character()
-        elif key == Key.enter:
-            self.save_snapshot()
-            self.buffer = self.buffer.split_line(self.cursor.x, self.cursor.y)
-            self.cursor = self.cursor.down(self.buffer).move_to_y(0)
-            self.character = Character("\n")
+             [self.buffer, self.cursor, self.character] = keyable.actions['char'](str(key)[1])
+        elif key in [Key.space, Key.tab, Key.esc, Key.delete, Key.enter]:
+            [self.buffer, self.cursor, self.character] = keyable.actions[key]()
         elif key == Key.up:
             self.cursor = self.cursor.up(self.buffer)
         elif key == Key.down:
@@ -119,64 +109,10 @@ class Editor:
         else:
             return
 
-class Buffer:
-    def __init__(self, lines):
-        self.lines = lines
-
-    def render(self):
-        for line in self.lines:
-            print(line + "\n")
-            # view in console for now
-
-    def insert(self, char, x, y):
-        lines = dupe(self.lines)
-        lines[x] = lines[x][:y] + char + lines[x][y:]
-        return Buffer(lines)
-
-    def delete(x,y):
-        lines = dupe(self.lines)
-        lines[x] = lines[x][:y - 1 ]  + lines[x][y:]
-        return Buffer(lines)
-    
-    def split_line(x, y):
-        lines = dupe(self.lines)
-        lines[x] = [lines[x][:y]]  + [lines[x][y:]]
-        return Buffer(lines)
-
-class Cursor:
-    def __init__(self, x=0, y=0):
-        self.x = x
-        self.y = y
-        self.x_max = 100
-        self.y_max = 100
-
-    def up(self, buff):
-        return Cursor(self.x - 1, self.y).clamp(buff)
-
-    def down(self, buff):
-        return Cursor(self.x + 1, self.y).clamp(buff)
-
-    def right(self, buff):
-        return Cursor(self.x, self.y + 1).clamp(buff)
-
-    def left(self, buff):
-        return Cursor(self.x, self.y - 1).clamp(buff)
-
-    def clamp(self, buff):
-        x = max(min(self.x, self.line_height(buff)), 0)
-        y = max(min(self.y, self.line_length(buff)), 0)
-        return Cursor(x, y)
-
-    def move_to_y(self, y):
-        return Cursor(self.x, y)
-
-    def line_length(self, buff):
-        return len(buff.lines[self.x])
-
-    def line_height(self, buff):
-        return len(buff.lines)
-
 class Character:
     def __init__(self, char=""):
         self.char = char
+
+    def new(self, char):
+        return Character(char)
 
