@@ -11,12 +11,12 @@ from Writer.cursor import Cursor
 import math
 
 # Waveshare e-ink specs 
-CHAR_LENGTH     =   32
-LINES           =   5 
-LINE_STEP       =   20
-CHAR_WIDTH      =   10
-EPD_HEIGHT      =   128
-EPD_WIDTH       =   296
+CHAR_LENGTH  =   32
+LINES        =   5 
+LINE_STEP    =   20
+CHAR_WIDTH   =   10
+EPD_HEIGHT   =   128
+EPD_WIDTH    =   296
 
 class Display: 
     def __init__(self, lines):
@@ -47,6 +47,7 @@ class Editor:
         self.image = image
         self.font = font
         self.epd = epd
+        self.keyable = OnPress(self)
 
     def render(self):
         self.buffer.render()
@@ -93,11 +94,12 @@ class Editor:
             self.display_epd()
 
     def on_press(self, key):
-        keyable = OnPress(self)
+        self.save_snapshot()
         if hasattr(key, 'char'):
-             [self.buffer, self.cursor, self.character] = keyable.actions['char'](str(key)[1])
+             [self.buffer, self.cursor, self.character] = self.keyable.actions['char'](str(key)[1])
         elif key in [Key.space, Key.tab, Key.esc, Key.delete, Key.enter]:
-            [self.buffer, self.cursor, self.character] = keyable.actions[key]()
+            [self.buffer, self.cursor, self.character] = self.keyable.actions[key]()
+            print(self.buffer.lines)
         elif key == Key.up:
             self.cursor = self.cursor.up(self.buffer)
         elif key == Key.down:

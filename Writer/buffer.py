@@ -24,6 +24,6 @@ class Buffer:
     
     def split_line(self, x, y):
         lines = dupe(self.lines)
-        lines[x] = [lines[x][:y]] 
-        lines.append([lines[x][y:]])
+        lines[x] = self.lines[x][:y]
+        lines.insert(x + 1, self.lines[x][y:])
         return Buffer(lines)
